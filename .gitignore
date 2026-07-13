@@ -1,0 +1,12 @@
+# Build output
+build/
+
+# IDE
+.vscode/
+
+# Zephyr workspace symlink
+__repo__
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,22 @@
+{
+  "version": 7,
+  "cmakeMinimumRequired": {
+    "major": 3
+  },
+  "configurePresets": [
+    {
+      "name": "build-env",
+      "displayName": "build-env",
+      "hidden": true,
+      "environment": {
+        "ZEPHYR_BASE": "/home/johnny/Projects/MCXN947/nxp_zephyr/zephyr",
+        "MCUX_VENV_PATH": "/home/johnny/.mcuxpressotools/.mcux-venv-3.12/bin",
+        "ZEPHYR_SDK_INSTALL_DIR": "/home/johnny/zephyr-sdk-1.0.1/gnu",
+        "PATH": "$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    }
+  ],
+  "buildPresets": []
+}
