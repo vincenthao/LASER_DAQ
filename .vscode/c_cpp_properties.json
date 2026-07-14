@@ -1,0 +1,15 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "ARM GCC (Zephyr)",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+      "intelliSenseMode": "gcc-arm",
+      "compilerPath": "/home/johnny/zephyr-sdk-1.0.1/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc",
+      "cStandard": "c17",
+      "browse": {
+        "limitSymbolsToIncludedHeaders": false
+      }
+    }
+  ]
+}

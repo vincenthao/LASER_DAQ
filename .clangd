@@ -1,0 +1,21 @@
+CompileFlags:
+  CompilationDatabase: build/
+  Remove:
+    - "-fno-printf-return-value"
+    - "-mfp16-format=ieee"
+    - "-fno-reorder-functions"
+
+Diagnostics:
+  Suppress:
+    - "drv_unknown_argument"
+
+Index:
+  Background: Build
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  ShowAKA: Yes

@@ -1,0 +1,19 @@
+/*
+ * LASER DAQ — CAN 设备树覆盖
+ *
+ * 对端设备: GD32F407 (CAN2, PB5/PB6), 1Mbps, 70% 采样点, 标准帧
+ * 本端硬件: FRDM-MCXN947 flexcan0, PIO1_10 (TXD) / PIO1_11 (RXD)
+ * 收发器:   TJA1057 (3.3V, 最大 1 Mbps)
+ */
+
+&flexcan0 {
+	status = "okay";
+	bitrate = <1000000>;
+	sample-point = <700>;
+	sjw = <1>;
+
+	can-transceiver {
+		/* TJA1057 — 传统 CAN, 最大 1 Mbps */
+		max-bitrate = <1000000>;
+	};
+};
