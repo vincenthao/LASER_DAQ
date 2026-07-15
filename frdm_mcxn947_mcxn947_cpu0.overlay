@@ -6,14 +6,22 @@
  * 收发器:   TJA1057 (3.3V, 最大 1 Mbps)
  */
 
+/{
+    aliases {
+        can0 = &flexcan0; /* can0: app层使用的 CAN 总线别名 */
+    };
+};
+
 &flexcan0 {
 	status = "okay";
 	bitrate = <1000000>;
 	sample-point = <700>;
-	sjw = <1>;
 
 	can-transceiver {
 		/* TJA1057 — 传统 CAN, 最大 1 Mbps */
 		max-bitrate = <1000000>;
 	};
 };
+
+
+

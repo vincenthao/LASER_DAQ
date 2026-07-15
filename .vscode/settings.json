@@ -23,5 +23,19 @@
   "devicetree.zephyr": "/home/johnny/Projects/MCXN947/nxp_zephyr/zephyr",
   "devicetree.defaultBoard": "frdm_mcxn947/mcxn947/cpu0",
   "clangd.onConfigChanged": "restart",
-  "clangd.enabled": false
+  "clangd.enabled": true,
+  "[c]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "terminal.integrated.minimumContrastRatio": 1,
+  "workbench.colorCustomizations": {
+    "terminal.ansiRed": "#F44747",
+    "terminal.ansiYellow": "#CCA700",
+    "terminal.ansiGreen": "#6A9955",
+    "terminal.ansiBrightRed": "#F44747",
+    "terminal.ansiBrightYellow": "#FFD700"
+  }
 }
