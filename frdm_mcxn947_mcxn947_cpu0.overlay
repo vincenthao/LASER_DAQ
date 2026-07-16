@@ -1,27 +1,67 @@
 /*
- * LASER DAQ — CAN 设备树覆盖
+ * LASER DAQ — FRDM-MCXN947 设备树覆盖
  *
  * 对端设备: GD32F407 (CAN2, PB5/PB6), 1Mbps, 70% 采样点, 标准帧
  * 本端硬件: FRDM-MCXN947 flexcan0, PIO1_10 (TXD) / PIO1_11 (RXD)
  * 收发器:   TJA1057 (3.3V, 最大 1 Mbps)
+ * 存储:     W25Q64JV (8 MB SPI NOR, 挂载在 FlexSPI)
  */
+
+/* ---- 别名: 芯片无关命名, 代码中通过 DT_ALIAS 引用 ---- */
 
 /{
     aliases {
-        can0 = &flexcan0; /* can0: app层使用的 CAN 总线别名 */
+        can0 = &flexcan0;     /* can0 → flexcan0, 代码用 DT_ALIAS(can0) 获取设备 */
     };
 };
 
-&flexcan0 {
-	status = "okay";
-	bitrate = <1000000>;
-	sample-point = <700>;
+/* ---- CAN 控制器: flexcan0, 传统 CAN, 1 Mbps, 70% 采样点 ---- */
 
-	can-transceiver {
-		/* TJA1057 — 传统 CAN, 最大 1 Mbps */
-		max-bitrate = <1000000>;
-	};
+&flexcan0 {
+    status = "okay";          /* 使能 CAN 控制器 (默认 disabled) */
+    bitrate = <1000000>;      /* 波特率 1 Mbps */
+    sample-point = <700>;     /* 采样点 70.0% (对齐 GD32 端 BS1=13TQ BS2=6TQ) */
+
+    can-transceiver {
+        /* TJA1057 — 传统 CAN 收发器, 最大 1 Mbps */
+        max-bitrate = <1000000>;
+    };
 };
 
+/* ---- 外部 Flash: W25Q64JV (8 MB SPI NOR, FlexSPI 接口) ---- */
 
+&w25q64jvssiq {
+    status = "okay";          /* 使能 NOR Flash (默认 disabled) */
 
+    partitions {
+        compatible = "fixed-partitions";  /* 固定分区表, Zephyr flash_map 识别 */
+        #address-cells = <1>;             /* 分区起始地址: 1 个 32-bit 单元 */
+        #size-cells = <1>;                /* 分区大小:     1 个 32-bit 单元 */
+
+        storage_partition: partition@0 {  /* 标签 = storage_partition, 代码中引用 */
+            label = "storage";            /* 分区名 (调试/识别用) */
+            reg = <0x0 0x800000>;         /* 起始 0x0, 大小 0x800000 = 8 MB, 整片用作 FatFS */
+        };
+    };
+};
+
+/* ---- HS USB: USB1 (EHCI, 480 Mbps), 用作 Mass Storage Device ---- */
+
+&usb1 {
+    status = "okay";          /* 使能 USB1 控制器 */
+};
+
+&usbphy1 {
+    status = "okay";          /* 使能 USB1 物理层 (PHY) */
+};
+
+/* MSC 磁盘: 将 Flash 分区暴露为 USB 大容量存储设备 */
+
+/ {
+    msc_disk0 {
+        compatible = "zephyr,flash-disk";    /* Zephyr Flash 磁盘驱动 */
+        partition = <&storage_partition>;     /* 绑定到 storage_partition 分区 */
+        disk-name = "NAND";                  /* 磁盘名 (Kconfig 中 MASS_STORAGE_DISK_NAME 一致) */
+        cache-size = <4096>;                 /* 读写缓存大小 (4 KB) */
+    };
+};
