@@ -6,10 +6,10 @@
 
 #include "can_sniffer.h"                 /* 嗅探模块头文件 */
 
-#include <zephyr/kernel.h>               /* k_timer, k_uptime_get, k_mutex */
+#include <zephyr/kernel.h>               /* k_uptime_get, k_mutex */
 #include <zephyr/fs/fs.h>                /* fs_open/fs_write/fs_close */
 #include <zephyr/logging/log.h>          /* LOG_INF, LOG_ERR */
-#include <string.h>                      /* snprintf, memcpy */
+#include <string.h>                      /* memset, memcpy */
 #include <stdio.h>                       /* snprintf */
 
 LOG_MODULE_REGISTER(can_sniffer, LOG_LEVEL_INF); /* 注册日志模块 */
@@ -28,11 +28,6 @@ struct sniff_buf {
 static struct sniff_buf s_bufs[SNIFF_MAX_NODES];
 static K_MUTEX_DEFINE(s_lock);           /* 缓冲区互斥锁 */
 
-/* ---- 定时器 ---- */
-
-static void sniff_flush_timer_cb(struct k_timer *timer); /* 定时器回调 */
-K_TIMER_DEFINE(s_flush_timer, sniff_flush_timer_cb, NULL); /* 刷盘定时器 */
-
 /* ---- 内部函数 ---- */
 
 static void ensure_node_dir(uint8_t node_id);        /* 确保目录存在 */
@@ -47,13 +42,12 @@ int can_sniffer_init(void)
 	memset(s_bufs, 0, sizeof(s_bufs));        /* 清零所有缓冲区 */
 
 	/* 创建根目录下的 sniff 文件夹 */
-	fs_mkdir("/NAND:/sniff");                 /* 忽略失败(已存在) */
+	int ret = fs_mkdir("/NAND:/sniff");       /* 创建 sniff 目录 */
+	if (ret < 0 && ret != -EEXIST) {
+		LOG_ERR("mkdir /NAND:/sniff failed: %d", ret);
+	}
 
-	k_timer_start(&s_flush_timer,
-		      K_MSEC(SNIFF_FLUSH_PERIOD_MS),
-		      K_MSEC(SNIFF_FLUSH_PERIOD_MS)); /* 启动 1s 定时器 */
-
-	LOG_INF("CAN sniffer started, flush every %d ms", SNIFF_FLUSH_PERIOD_MS);
+	LOG_INF("CAN sniffer started (flush via main loop)"); /* 就绪 */
 	return 0;                                 /* 成功 */
 }
 
@@ -84,17 +78,21 @@ void can_sniffer_feed(const struct can_frame *frame)
 	b->count++;                               /* 帧计数 +1 */
 	b->dirty = true;                          /* 标记有新数据 */
 
+	/* 首次收到该节点的帧时打印提示 */
+	bool first_frame = (b->count == 1);       /* 是否首帧 */
 	k_mutex_unlock(&s_lock);                  /* 解锁 */
+
+	if (first_frame) {
+		LOG_INF("Sniff: new node %u (ID=0x%03X)", node_id, frame->id); /* 新增节点 */
+	}
 }
 
 /* ================================================================
- * 定时器回调 — 每秒刷盘
+ * can_sniffer_flush — 批量刷盘 (主循环调用)
  * ================================================================ */
 
-static void sniff_flush_timer_cb(struct k_timer *timer)
+void can_sniffer_flush(void)
 {
-	(void)timer;                              /* 未使用 */
-
 	for (int i = 0; i < SNIFF_MAX_NODES; i++) {
 		k_mutex_lock(&s_lock, K_FOREVER);     /* 加锁 */
 		bool needs_flush = s_bufs[i].dirty;   /* 是否需要刷 */
@@ -114,7 +112,10 @@ static void ensure_node_dir(uint8_t node_id)
 {
 	char path[32];                            /* 目录路径 */
 	snprintf(path, sizeof(path), "/NAND:/sniff/%u", node_id); /* 拼接路径 */
-	fs_mkdir(path);                           /* 创建目录 (忽略已存在) */
+	int ret = fs_mkdir(path);                 /* 创建目录 */
+	if (ret < 0 && ret != -EEXIST) {
+		LOG_ERR("mkdir %s failed: %d", path, ret); /* 创建失败 */
+	}
 }
 
 /* ================================================================
@@ -181,5 +182,5 @@ static void flush_node(uint8_t node_id)
 	}
 
 	fs_close(&f);                             /* 关闭文件 */
-	LOG_DBG("Flushed %d frames for node %u", count, node_id); /* 刷盘日志 */
+	LOG_INF("Sniff: flushed %d frames to %s", count, file_path); /* 刷盘日志 */
 }

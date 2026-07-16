@@ -166,7 +166,8 @@ int main(void)
 	LOG_INF("All subsystems initialized, entering main loop");  /* 就绪 */
 
 	while (1) {
-		/* 主循环: 空闲, 嗅探由 can_rx_thread + 定时刷盘接管 */
+		/* 主循环: 每秒批量刷盘 CAN 嗅探数据 */
+		can_sniffer_flush();                      /* 将缓冲区帧写入 CSV */
 		k_msleep(1000);                           /* 休眠 1 秒 */
 	}
 
@@ -333,7 +334,7 @@ static int init_storage(void)
 
 	/* 递归遍历并打印文件系统内容 */
 	LOG_INF("--- /NAND: contents ---");           /* 列表头 */
-	print_dir("/NAND:", 0);                       /* 从根目录开始 */
+	print_dir("/NAND:/", 0);                      /* 从根目录开始 (尾随斜杠) */
 	LOG_INF("--- end of list ---");
 
 	LOG_INF("Storage init done, USB MSC ready");   /* 初始化完成 */
