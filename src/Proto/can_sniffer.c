@@ -42,10 +42,10 @@ int can_sniffer_init(void)
 {
 	memset(s_bufs, 0, sizeof(s_bufs));        /* 清零所有缓冲区 */
 
-	/* 创建根目录下的 sniff 文件夹 */
-	int ret = fs_mkdir("/NAND:/sniff");       /* 创建 sniff 目录 */
-	if (ret < 0 && ret != -EEXIST) {
-		LOG_ERR("mkdir /NAND:/sniff failed: %d", ret);
+	/* 创建根目录下的 sniff 文件夹 (先检查避免 FATFS 内部报错) */
+	struct fs_dirent entry;
+	if (fs_stat("/NAND:/sniff", &entry) != 0) {
+		fs_mkdir("/NAND:/sniff");             /* 不存在则创建 */
 	}
 
 	LOG_INF("CAN sniffer started (flush via main loop)"); /* 就绪 */
@@ -114,7 +114,12 @@ static void ensure_node_dir(uint8_t node_id)
 {
 	char path[32];                            /* 目录路径 */
 	snprintf(path, sizeof(path), "/NAND:/sniff/%u/", node_id); /* 拼接路径 (+尾随斜杠) */
-	fs_mkdir(path);                           /* 创建目录 (忽略错误, 已存在也OK) */
+
+	/* 先检查目录是否存在, 避免 FATFS 内部打印 EEXIST 错误 */
+	struct fs_dirent entry;
+	if (fs_stat(path, &entry) != 0) {
+		fs_mkdir(path);                       /* 不存在则创建 */
+	}
 }
 
 /* ================================================================
