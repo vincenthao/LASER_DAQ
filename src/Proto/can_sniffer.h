@@ -12,7 +12,7 @@
 #include <zephyr/drivers/can.h>         /* struct can_frame */
 
 /* 环形缓冲区大小 (每 node_id 最大缓存帧数) */
-#define SNIFF_BUF_SIZE  16
+#define SNIFF_BUF_SIZE  32
 
 /* CSV 一行的最大字节数 */
 #define SNIFF_CSV_LINE_MAX 128
