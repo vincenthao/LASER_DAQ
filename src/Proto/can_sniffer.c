@@ -23,8 +23,8 @@ struct sniff_buf {
 	bool dirty;                              /* 有新数据等待刷盘 */
 };
 
-/* 最多支持 16 个 CAN 节点 (实际总线上不会超过这个数) */
-#define SNIFF_MAX_NODES 16
+/* 最多支持 128 个 CAN 节点 (node_id 0-127) */
+#define SNIFF_MAX_NODES 128
 static struct sniff_buf s_bufs[SNIFF_MAX_NODES];
 static K_MUTEX_DEFINE(s_lock);           /* 缓冲区互斥锁 */
 
