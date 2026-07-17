@@ -26,6 +26,7 @@ struct sniff_buf {
 /* 最多支持 128 个 CAN 节点 (node_id 0-127) */
 #define SNIFF_MAX_NODES 128
 static struct sniff_buf s_bufs[SNIFF_MAX_NODES];
+static bool s_node_seen[SNIFF_MAX_NODES]; /* 已打印过 new node 提示 */
 static K_MUTEX_DEFINE(s_lock);           /* 缓冲区互斥锁 */
 
 /* ---- 内部函数 ---- */
@@ -78,11 +79,12 @@ void can_sniffer_feed(const struct can_frame *frame)
 	b->count++;                               /* 帧计数 +1 */
 	b->dirty = true;                          /* 标记有新数据 */
 
-	/* 首次收到该节点的帧时打印提示 */
-	bool first_frame = (b->count == 1);       /* 是否首帧 */
+	/* 运行时首次检测到节点时打印一次 (不随 flush 重复) */
+	bool is_new = !s_node_seen[node_id];      /* 是否首次发现 */
+	s_node_seen[node_id] = true;              /* 标记已见 */
 	k_mutex_unlock(&s_lock);                  /* 解锁 */
 
-	if (first_frame) {
+	if (is_new) {
 		LOG_INF("Sniff: new node %u (ID=0x%03X)", node_id, frame->id); /* 新增节点 */
 	}
 }
@@ -111,20 +113,19 @@ void can_sniffer_flush(void)
 static void ensure_node_dir(uint8_t node_id)
 {
 	char path[32];                            /* 目录路径 */
-	snprintf(path, sizeof(path), "/NAND:/sniff/%u", node_id); /* 拼接路径 */
-	int ret = fs_mkdir(path);                 /* 创建目录 */
-	if (ret < 0 && ret != -EEXIST) {
-		LOG_ERR("mkdir %s failed: %d", path, ret); /* 创建失败 */
-	}
+	snprintf(path, sizeof(path), "/NAND:/sniff/%u/", node_id); /* 拼接路径 (+尾随斜杠) */
+	fs_mkdir(path);                           /* 创建目录 (忽略错误, 已存在也OK) */
 }
 
 /* ================================================================
  * flush_node — 将指定 node_id 缓冲区刷到 CSV 文件
  * ================================================================ */
 
+/* flush_node 本地缓冲区 — 静态分配, 避免栈溢出 */
+static struct can_frame s_local_buf[SNIFF_BUF_SIZE]; /* 拷贝用缓冲 */
+
 static void flush_node(uint8_t node_id)
 {
-	struct can_frame local_buf[SNIFF_BUF_SIZE]; /* 本地缓冲区 */
 	int count;                                /* 待写入帧数 */
 
 	/* 加锁拷贝缓冲区到本地, 快速释放锁 */
@@ -138,7 +139,7 @@ static void flush_node(uint8_t node_id)
 	/* 按顺序拷贝 */
 	for (int i = 0; i < count; i++) {
 		int src = (b->head + i) % SNIFF_BUF_SIZE;
-		memcpy(&local_buf[i], &b->frames[src], sizeof(struct can_frame));
+		memcpy(&s_local_buf[i], &b->frames[src], sizeof(struct can_frame));
 	}
 	b->head = 0;                              /* 重置缓冲区 */
 	b->count = 0;                             /* 清空 */
@@ -148,23 +149,28 @@ static void flush_node(uint8_t node_id)
 	/* 确保目录存在 */
 	ensure_node_dir(node_id);
 
-	/* 打开 CSV 文件 (追加模式) */
+	/* 打开 CSV 文件: 先尝试追加, 不存在则创建 */
 	char file_path[48];                       /* 文件完整路径 */
 	snprintf(file_path, sizeof(file_path),
-		 "/NAND:/sniff/%u/sniff.csv", node_id); /* 拼接路径 */
+		 "/NAND:/sniff/%u/sniff.csv", node_id); /* 单文件 */
 
 	struct fs_file_t f;
 	int ret = fs_open(&f, file_path,
-			  FS_O_CREATE | FS_O_WRITE | FS_O_APPEND); /* 创建+追加 */
+			  FS_O_WRITE | FS_O_APPEND);       /* 尝试追加 */
 	if (ret < 0) {
-		LOG_ERR("Sniff open %s failed: %d", file_path, ret);
+		/* 文件不存在或不可追加, 重新创建 */
+		ret = fs_open(&f, file_path,
+			      FS_O_CREATE | FS_O_WRITE);    /* 创建新文件 */
+	}
+	if (ret < 0) {
+		LOG_ERR("Sniff open %s failed: %d", file_path, ret); /* 打开失败 */
 		return;
 	}
 
 	/* 逐帧写入 CSV */
 	char line[SNIFF_CSV_LINE_MAX];            /* CSV 行缓冲区 */
 	for (int i = 0; i < count; i++) {
-		struct can_frame *frame = &local_buf[i]; /* 当前帧 */
+		struct can_frame *frame = &s_local_buf[i]; /* 当前帧 */
 		uint32_t uptime = k_uptime_get();       /* 时间戳 (ms) */
 
 		int len = snprintf(line, sizeof(line),

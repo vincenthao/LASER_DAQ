@@ -77,7 +77,7 @@ static int init_network_upload(void);   /* 网络上传子系统 */
 void can_rx_thread(void *, void *, void *);  /* CAN 接收处理线程 */
 
 /* 线程栈定义 */
-K_THREAD_DEFINE(can_rx_tid, 1024,       /* 线程 ID + 栈大小 1024 字节 */
+K_THREAD_DEFINE(can_rx_tid, 2048,       /* 线程 ID + 栈大小 2048 字节 */
 		can_rx_thread, NULL, NULL, NULL, /* 入口函数 + 参数（无） */
 		7, 0, 0);                       /* 优先级 7, 无延迟启动 */
 
