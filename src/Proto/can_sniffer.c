@@ -146,20 +146,26 @@ static void flush_node(uint8_t node_id)
 	/* 确保目录存在 */
 	ensure_node_dir(node_id);
 
-	/* 打开 CSV 文件: 先追加, 不存在则创建 */
+	/* 打开 CSV 文件: fs_stat 检查存在 → 打开追加; 不存在 → 创建 */
 	char file_path[48];                       /* 文件完整路径 */
 	snprintf(file_path, sizeof(file_path),
 		 "/NAND:/sniff/%u/sniff.csv", node_id); /* 单文件 */
 
 	struct fs_file_t f;
 	fs_file_t_init(&f);                       /* 初始化文件对象 */
-	int ret = fs_open(&f, file_path,
-			  FS_O_APPEND | FS_O_WRITE);        /* 尝试追加 */
-	if (ret == -ENOENT) {
-		/* 文件不存在, 重新初始化并创建 */
-		fs_file_t_init(&f);                   /* 重新初始化 */
-		ret = fs_open(&f, file_path,
-			      FS_O_CREATE | FS_O_WRITE);    /* 创建新文件 */
+	int ret;
+
+	/* 用 fs_stat 判断文件是否已存在 */
+	struct fs_dirent entry;
+	if (fs_stat(file_path, &entry) == 0) {
+		/* 文件存在 → 读写打开 + seek 到末尾 */
+		ret = fs_open(&f, file_path, FS_O_RDWR); /* 不截断打开 */
+		if (ret == 0) {
+			fs_seek(&f, 0, FS_SEEK_END);      /* 移到文件末尾 */
+		}
+	} else {
+		/* 文件不存在 → 创建 */
+		ret = fs_open(&f, file_path, FS_O_CREATE | FS_O_WRITE);
 	}
 	if (ret < 0) {
 		LOG_ERR("Sniff open %s failed: %d", file_path, ret); /* 打开失败 */
