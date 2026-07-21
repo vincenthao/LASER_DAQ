@@ -29,6 +29,7 @@
 
 #include "Proto/can_proto.h"            /* CAN 协议层 */
 #include "Proto/can_sniffer.h"           /* CAN 嗅探模块 */
+#include "Proto/can_collect.h"           /* CAN 数据采集模块 */
 
 LOG_MODULE_REGISTER(laser_daq, LOG_LEVEL_INF); /* 注册日志模块 "laser_daq" */
 
@@ -158,7 +159,12 @@ int main(void)
 		LOG_ERR("CAN sniffer init failed");       /* 嗅探初始化失败 */
 	}
 
-	/* 6. 网络上传子系统 */
+	/* 6. CAN 采集 — 主动轮询各 K64 测量值, 窄表 CSV */
+	if (can_collect_init(CAN_DEV) < 0) {
+		LOG_ERR("CAN collect init failed");       /* 采集初始化失败 */
+	}
+
+	/* 7. 网络上传子系统 */
 	if (init_network_upload() < 0) {
 		LOG_ERR("Network upload init failed");
 	}
@@ -166,9 +172,11 @@ int main(void)
 	LOG_INF("All subsystems initialized, entering main loop");  /* 就绪 */
 
 	while (1) {
-		/* 主循环: 每秒批量刷盘 CAN 嗅探数据 */
-		can_sniffer_flush();                      /* 将缓冲区帧写入 CSV */
-		k_msleep(1000);                           /* 休眠 1 秒 */
+		/* 主循环: 轮询各 K64 采集数据 + 批量刷盘 */
+		can_collect_poll(CAN_DEV);                /* 发送查询指令 */
+		can_sniffer_flush();                      /* 嗅探数据写 CSV */
+		can_collect_flush();                      /* 采集数据写 CSV */
+		k_msleep(COLLECT_POLL_PERIOD_MS);         /* 轮询间隔 */
 	}
 
 	return 0;
@@ -249,8 +257,9 @@ void can_rx_thread(void *arg1, void *arg2, void *arg3)
 			continue;
 		}
 
-		/* 嗅探模式: 存入缓冲区, 定时器批量写入 CSV */
-		can_sniffer_feed(&frame);
+		/* 嗅探 + 采集: 原始帧和结构化数据并存 */
+		can_sniffer_feed(&frame);                 /* 原始嗅探 */
+		can_collect_feed(&frame);                 /* 采集解析 */
 	}
 }
 
@@ -293,7 +302,7 @@ static void print_dir(const char *path, int depth)
 
 		/* 递归进入子目录 */
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			char sub_path[256];                   /* 子目录路径 */
+			char sub_path[280];                   /* 子目录路径 */
 			snprintf(sub_path, sizeof(sub_path), "%s/%s", path, entry.name);
 			print_dir(sub_path, depth + 1);       /* 递归遍历 */
 		}
