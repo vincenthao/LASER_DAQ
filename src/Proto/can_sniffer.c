@@ -28,11 +28,56 @@ struct sniff_buf {
 static struct sniff_buf s_bufs[SNIFF_MAX_NODES];
 static bool s_node_seen[SNIFF_MAX_NODES]; /* 已打印过 new node 提示 */
 static K_MUTEX_DEFINE(s_lock);           /* 缓冲区互斥锁 */
+static int s_boot_seq;                   /* 本次启动的文件序号 */
 
 /* ---- 内部函数 ---- */
 
+/* 功能码 → 名称映射表 */
+static const char *func_name(uint8_t func_code) {
+	static const char *names[] = {
+		"SETPARA", "RPTALAM", "RESERVD", "RPTSWIT",
+		"SETSWIT", "RPTCURR", "SETCURR", "RPTTEMP",
+		"SETTEMP", "RPTREGS", "SETREGS", "RPTFILE",
+		"SETFILE", "RPTPDPW", "HEARTBT", "RPTALAMDATA",
+	};
+	return (func_code < 16) ? names[func_code] : "???";
+}
+
 static void ensure_node_dir(uint8_t node_id);        /* 确保目录存在 */
 static void flush_node(uint8_t node_id);              /* 刷单个 node 缓冲区到 CSV */
+
+/* 扫描已有 CSV, 取最大序号 +1 作为本次启动序号 */
+static int find_max_boot_seq(void)
+{
+	int max_seq = 0;
+	struct fs_dir_t dir;
+	fs_dir_t_init(&dir);
+	if (fs_opendir(&dir, "/NAND:/sniff/") != 0) {
+		return 1;                                 /* sniff 目录为空, 从 1 开始 */
+	}
+	while (1) {
+		struct fs_dirent entry = { 0 };
+		if (fs_readdir(&dir, &entry) < 0 || entry.name[0] == '\0') break;
+		if (entry.type != FS_DIR_ENTRY_DIR) continue;
+		/* 扫描子目录内的 sniff_NNNN.csv */
+		char sub[64];
+		snprintf(sub, sizeof(sub), "/NAND:/sniff/%s/", entry.name);
+		struct fs_dir_t sub_dir;
+		fs_dir_t_init(&sub_dir);
+		if (fs_opendir(&sub_dir, sub) != 0) continue;
+		while (1) {
+			struct fs_dirent fe = { 0 };
+			if (fs_readdir(&sub_dir, &fe) < 0 || fe.name[0] == '\0') break;
+			int seq;
+			if (sscanf(fe.name, "sniff_%d.csv", &seq) == 1) {
+				if (seq > max_seq) max_seq = seq;
+			}
+		}
+		fs_closedir(&sub_dir);
+	}
+	fs_closedir(&dir);
+	return max_seq + 1;
+}
 
 /* ================================================================
  * can_sniffer_init — 初始化
@@ -45,7 +90,10 @@ int can_sniffer_init(void)
 	/* 创建根目录下的 sniff 文件夹 */
 	fs_mkdir("/NAND:/sniff");                 /* 忽略 EEXIST */
 
-	LOG_INF("CAN sniffer started (flush via main loop)"); /* 就绪 */
+	/* 扫描已有 CSV 序号, 本次启动 +1 */
+	s_boot_seq = find_max_boot_seq();
+
+	LOG_INF("CAN sniffer started, boot_seq=%d", s_boot_seq); /* 就绪 */
 	return 0;                                 /* 成功 */
 }
 
@@ -149,7 +197,8 @@ static void flush_node(uint8_t node_id)
 	/* 打开 CSV 文件: fs_stat 检查存在 → 打开追加; 不存在 → 创建 */
 	char file_path[48];                       /* 文件完整路径 */
 	snprintf(file_path, sizeof(file_path),
-		 "/NAND:/sniff/%u/sniff.csv", node_id); /* 单文件 */
+		 "/NAND:/sniff/%u/sniff_%04d.csv",
+		 node_id, s_boot_seq);                /* 启动序号命名 */
 
 	struct fs_file_t f;
 	fs_file_t_init(&f);                       /* 初始化文件对象 */
@@ -179,9 +228,11 @@ static void flush_node(uint8_t node_id)
 		uint32_t uptime = k_uptime_get();       /* 时间戳 (ms) */
 
 		int len = snprintf(line, sizeof(line),
-			"%u,0x%03X,%u,%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X\n",
+			"%u,0x%03X,%s,%u,%u,%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X\n",
 			uptime,                              /* 时间戳 */
 			frame->id,                           /* CAN ID (hex) */
+			func_name((frame->id >> 7) & 0x0F),   /* 功能码名 */
+			frame->id & 0x7F,                     /* 目标设备 ID */
 			frame->dlc,                          /* DLC */
 			frame->data[0], frame->data[1],      /* 数据字节 0-7 */
 			frame->data[2], frame->data[3],
