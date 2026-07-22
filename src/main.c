@@ -18,6 +18,7 @@
 #include <zephyr/device.h>             /* device_is_ready, DEVICE_DT_GET */
 #include <zephyr/devicetree.h>         /* DT_NODELABEL 等设备树宏 */
 #include <zephyr/drivers/can.h>        /* CAN 驱动 API */
+#include <zephyr/drivers/uart.h>       /* UART 驱动 API (中断接收) */
 #include <zephyr/logging/log.h>        /* 日志模块 */
 #include <zephyr/fs/fs.h>			   /* 文件系统 API */
 
@@ -26,6 +27,7 @@
 #include <zephyr/usb/usbd.h>           /* 新一代 USB 设备栈 */
 #include <zephyr/usb/class/usbd_msc.h> /* USB Mass Storage Class */
 #include <zephyr/usb/bos.h>            /* USB BOS 描述符 */
+#include <zephyr/usb/usbd_msg.h>       /* USB 消息类型 (CONFIGURATION 等) */
 
 #include "Proto/can_proto.h"            /* CAN 协议层 */
 #include "Proto/can_sniffer.h"           /* CAN 嗅探模块 */
@@ -64,6 +66,113 @@ USBD_CONFIGURATION_DEFINE(laser_hs_config, 0, 100, &laser_hs_cfg);  /* 高速 */
 /* ---- 全局状态 ---- */
 
 static FATFS fat_fs;                     /* FatFS 文件系统对象 (持久化) */
+static volatile bool g_storage_locked;    /* USB 连接时置 true, 暂停文件写入 */
+
+/* ---- 串口指令接收 ---- */
+
+#define UART_DEV DEVICE_DT_GET(DT_CHOSEN(zephyr_console)) /* 控制台 UART */
+#define UART_CMD_BUF_SIZE 32                               /* 指令缓冲 */
+
+static char s_cmd_buf[UART_CMD_BUF_SIZE];                  /* 行缓冲 */
+static int s_cmd_pos;                                      /* 写指针 */
+
+/* ---- 擦除 Flash 格式化 ---- */
+
+static void erase_flash_and_format(void)
+{
+	printk("\n=== EraseFlash START ===\n");
+
+	/* 1. 卸载 FatFS */
+	FRESULT fres = f_mount(NULL, "NAND:", 0);
+	printk("Unmount: %d\n", fres);
+
+	/* 2. 格式化 */
+	uint8_t work[FF_MAX_SS];                  /* mkfs 工作缓冲 */
+	MKFS_PARM mkfs_opt = {
+		.fmt = FM_ANY | FM_SFD,           /* 自动选择 FAT 类型 */
+		.n_fat = 1,                       /* 单 FAT 表 */
+		.align = 0,                       /* 自动获取扇区大小 */
+		.n_root = 512,                    /* 根目录条目数 */
+		.au_size = 0                      /* 自动计算簇大小 */
+	};
+	fres = f_mkfs("NAND:", &mkfs_opt, work, sizeof(work));
+	printk("Format: %d (%s)\n", fres, (fres == FR_OK) ? "OK" : "FAIL");
+
+	/* 3. 重新挂载 */
+	struct fs_mount_t mp = {
+		.type = FS_FATFS,
+		.fs_data = &fat_fs,
+		.storage_dev = (void *)PARTITION_ID(storage_partition),
+		.mnt_point = "/NAND:",
+	};
+	int ret = fs_mount(&mp);
+	printk("Mount: %d (%s)\n", ret, (ret == 0) ? "OK" : "FAIL");
+
+	/* 4. 重建目录 */
+	if (ret == 0) {
+		fs_mkdir("/NAND:/sniff");
+		fs_mkdir("/NAND:/collect");
+		printk("Dirs: sniff/ collect/ created\n");
+	}
+
+	printk("=== EraseFlash DONE ===\n\n");
+}
+
+/* ---- UART RX 中断回调 ---- */
+
+static void uart_rx_cb(const struct device *dev, void *user_data)
+{
+	(void)user_data;
+	uint8_t c;
+
+	/* 从 FIFO 取出所有已接收的字节 */
+	while (uart_fifo_read(dev, &c, 1) == 1) {
+		if (c == '\r' || c == '\n') {
+			/* 换行 → 指令完成 */
+			if (s_cmd_pos > 0) {
+				s_cmd_buf[s_cmd_pos] = '\0';
+				printk("\n[CMD] %s\n", s_cmd_buf);
+
+				/* 匹配指令 */
+				if (strcmp(s_cmd_buf, "EraseFlash") == 0) {
+					erase_flash_and_format();
+				} else {
+					printk("Unknown: %s\n", s_cmd_buf);
+				}
+				s_cmd_pos = 0;
+			}
+		} else if (c == '\b' || c == 0x7F) {
+			/* 退格 */
+			if (s_cmd_pos > 0) s_cmd_pos--;
+		} else if (c >= ' ' && c <= '~') {
+			/* 可打印字符 */
+			if (s_cmd_pos < UART_CMD_BUF_SIZE - 1) {
+				s_cmd_buf[s_cmd_pos++] = c;
+				printk("%c", c);          /* 回显 */
+			}
+		}
+	}
+}
+
+/* ---- USB 消息回调: 检测主机连接/断开 ---- */
+
+static void usb_status_cb(struct usbd_context *const ctx,
+			  const struct usbd_msg *const msg)
+{
+	if (msg->type == USBD_MSG_CONFIGURATION) {
+		/* status != 0 → 主机已配置设备, 文件系统被 PC 独占 */
+		g_storage_locked = (msg->status != 0);
+		if (g_storage_locked) {
+			LOG_WRN("USB configured, storage writes suspended");
+		} else {
+			LOG_INF("USB deconfigured, storage writes resumed");
+		}
+	} else if (msg->type == USBD_MSG_VBUS_REMOVED) {
+		/* VBUS 移除 → 物理断开, 恢复文件写入 */
+		g_storage_locked = false;
+		LOG_INF("USB disconnected, storage writes resumed");
+	}
+}
 
 /* ---- 子系统初始化 ---- */
 
@@ -72,6 +181,7 @@ static int init_storage(void);          /* FatFS 存储子系统 */
 static int init_usb_msc(void);          /* USB MSC 初始化 */
 static int init_lcd_display(void);      /* LCD 显示子系统 */
 static int init_network_upload(void);   /* 网络上传子系统 */
+static int init_uart_cmd(void);         /* 串口指令接收 */
 
 /* ---- 线程入口 ---- */
 
@@ -116,6 +226,7 @@ static int init_usb_msc(void)
 	/* 初始化并启用 USB 设备 */
 	err = usbd_init(&laser_usbd);                 /* 初始化 USBD 栈 */
 	if (err) { return err; }
+	usbd_msg_register_cb(&laser_usbd, usb_status_cb); /* 注册 USB 状态回调 */
 	err = usbd_enable(&laser_usbd);               /* 启用 USB, 开始枚举 */
 	if (err) { return err; }
 
@@ -144,27 +255,32 @@ int main(void)
 		LOG_ERR("Storage init failed");         /* 存储初始化失败 */
 	}
 
-	/* 3. USB Mass Storage — HS USB, 暴露 /NAND: 为 U 盘 */
+	/* 3. 串口指令 — 接收 EraseFlash 等控制台指令 */
+	if (init_uart_cmd() < 0) {
+		LOG_ERR("UART CMD init failed");        /* 串口初始化失败 */
+	}
+
+	/* 4. USB Mass Storage — HS USB, 暴露 /NAND: 为 U 盘 */
 	if (init_usb_msc() < 0) {
 		LOG_ERR("USB MSC init failed");         /* USB 初始化失败 */
 	}
 
-	/* 4. LCD 显示子系统 */
+	/* 5. LCD 显示子系统 */
 	if (init_lcd_display() < 0) {
 		LOG_ERR("LCD display init failed");
 	}
 
-	/* 5. CAN 嗅探 — 全量捕获总线帧, 按 node_id 存入 CSV */
+	/* 6. CAN 嗅探 — 全量捕获总线帧, 按 node_id 存入 CSV */
 	if (can_sniffer_init() < 0) {
 		LOG_ERR("CAN sniffer init failed");       /* 嗅探初始化失败 */
 	}
 
-	/* 6. CAN 采集 — 主动轮询各 K64 测量值, 窄表 CSV */
+	/* 7. CAN 采集 — 主动轮询各 K64 测量值, 窄表 CSV */
 	if (can_collect_init(CAN_DEV) < 0) {
 		LOG_ERR("CAN collect init failed");       /* 采集初始化失败 */
 	}
 
-	/* 7. 网络上传子系统 */
+	/* 8. 网络上传子系统 */
 	if (init_network_upload() < 0) {
 		LOG_ERR("Network upload init failed");
 	}
@@ -174,8 +290,10 @@ int main(void)
 	while (1) {
 		/* 主循环: 轮询各 K64 采集数据 + 批量刷盘 */
 		can_collect_poll(CAN_DEV);                /* 发送查询指令 */
-		can_sniffer_flush();                      /* 嗅探数据写 CSV */
-		can_collect_flush();                      /* 采集数据写 CSV */
+		if (!g_storage_locked) {
+			can_sniffer_flush();                  /* 嗅探数据写 CSV */
+			can_collect_flush();                  /* 采集数据写 CSV */
+		}
 		k_msleep(COLLECT_POLL_PERIOD_MS);         /* 轮询间隔 */
 	}
 
@@ -347,6 +465,28 @@ static int init_storage(void)
 	LOG_INF("--- end of list ---");
 
 	LOG_INF("Storage init done, USB MSC ready");   /* 初始化完成 */
+	return 0;
+}
+
+/* ================================================================
+ * 串口指令接收 — 通过控制台 UART 接收 "EraseFlash" 等指令
+ * ================================================================ */
+
+static int init_uart_cmd(void)
+{
+	if (!device_is_ready(UART_DEV)) {
+		LOG_ERR("UART device not ready");
+		return -1;
+	}
+
+	/* 注册中断回调 */
+	uart_irq_callback_set(UART_DEV, uart_rx_cb);
+
+	/* 使能 RX 中断 */
+	uart_irq_rx_enable(UART_DEV);
+
+	printk("\nSerial CMD ready. Type 'EraseFlash' to format NOR flash.\n");
+	LOG_INF("UART CMD listener started");
 	return 0;
 }
 
