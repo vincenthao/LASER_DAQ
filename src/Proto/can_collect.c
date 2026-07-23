@@ -155,6 +155,14 @@ void can_collect_feed(const struct can_frame *frame)
 		memcpy(&val, &frame->data[0], sizeof(val)); /* float */
 		slot = frame->data[4];                /* slot */
 		tp = frame->data[5];                  /* TP 类型码 */
+
+		/* TP 白名单: 只收 MCXN947 配置过的类型, 过滤主控遗留的旧配置上报 */
+		if (func == FUNC_RPTCURR) {
+			if (tp != TP_IREAL && tp != TP_ISET) return;  /* 仅收实测电流 + 目标值 */
+		} else { /* FUNC_RPTTEMP */
+			if (tp != TP_TREAL && tp != TP_T2REAL &&
+			    tp != TP_T3REAL && tp != TP_TECDUTY) return; /* 仅收 T1/T2/T3/TEC */
+		}
 		opcode = 0;                           /* 主动上报无 opcode */
 	} else {
 		/*
