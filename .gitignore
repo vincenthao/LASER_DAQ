@@ -3,11 +3,6 @@ build/
 
 # IDE
 .vscode/
-!.vscode/settings.json
-!.vscode/c_cpp_properties.json
-!.vscode/extensions.json
-!.vscode/tasks.json
-!.vscode/launch.json
 
 # clangd
 .clangd/

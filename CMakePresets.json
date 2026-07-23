@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "cmakeMinimumRequired": {
     "major": 3
   },
@@ -8,21 +8,22 @@
       "name": "build",
       "displayName": "build",
       "generator": "Ninja",
-      "binaryDir": "${fileDir}/${presetName}",
+      "binaryDir": "${sourceDir}/build",
       "inherits": "build-env",
       "cacheVariables": {
         "APP_DIR": {
-          "value": "${fileDir}",
+          "value": "${sourceDir}",
           "type": "PATH"
         },
-        "BOARD": "frdm_mcxn947/mcxn947/cpu0",
-        "CMAKE_BUILD_TYPE": "build",
-        "ZEPHYR_BASE": "$env{ZEPHYR_BASE}",
-        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
-        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
-        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
-      },
-      "toolchainFile": ""
+        "BOARD": {
+          "value": "frdm_mcxn947/mcxn947/cpu0",
+          "type": "STRING"
+        },
+        "Python3_EXECUTABLE": {
+          "value": "C:/Users/AisIT/.mcuxpressotools/.mcux-venv-3.12/Scripts/python.exe",
+          "type": "FILEPATH"
+        }
+      }
     }
   ],
   "buildPresets": [

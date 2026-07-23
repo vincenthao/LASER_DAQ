@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "cmakeMinimumRequired": {
     "major": 3
   },
@@ -9,13 +9,11 @@
       "displayName": "build-env",
       "hidden": true,
       "environment": {
-        "ZEPHYR_BASE": "/home/johnny/Projects/MCXN947/nxp_zephyr/zephyr",
-        "MCUX_VENV_PATH": "/home/johnny/.mcuxpressotools/.mcux-venv-3.12/bin",
-        "ZEPHYR_SDK_INSTALL_DIR": "/home/johnny/zephyr-sdk-1.0.1/gnu",
-        "PATH": "$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "ZEPHYR_BASE": "D:/Project/MCUXpressoSDK/nxp_zephyr/zephyr",
+        "ZEPHYR_SDK_INSTALL_DIR": "C:/Users/AisIT/zephyr-sdk-1.0.1",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CLICOLOR_FORCE": "1",
-        "GCC_COLORS": "error=01;31:warning=01;33:note=01;36:caret=01;32:locus=01:quote=01"
+        "MCUX_VENV_PATH": "C:/Users/AisIT/.mcuxpressotools/.mcux-venv-3.12/Scripts",
+        "PATH": "$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}"
       },
       "cacheVariables": {}
     }
