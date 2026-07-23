@@ -1,0 +1,20 @@
+{
+  "version": 8,
+  "cmakeMinimumRequired": {
+    "major": 3
+  },
+  "configurePresets": [
+    {
+      "name": "build-env",
+      "displayName": "build-env",
+      "hidden": true,
+      "environment": {
+        "ZEPHYR_BASE": "$env{ZEPHYR_BASE}",
+        "ZEPHYR_SDK_INSTALL_DIR": "$env{ZEPHYR_SDK_INSTALL_DIR}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    }
+  ],
+  "buildPresets": []
+}

@@ -18,10 +18,6 @@
         "BOARD": {
           "value": "frdm_mcxn947/mcxn947/cpu0",
           "type": "STRING"
-        },
-        "Python3_EXECUTABLE": {
-          "value": "C:/Users/AisIT/.mcuxpressotools/.mcux-venv-3.12/Scripts/python.exe",
-          "type": "FILEPATH"
         }
       }
     }

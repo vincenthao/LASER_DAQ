@@ -4,6 +4,10 @@ build/
 # IDE
 .vscode/
 
+# CMake presets (local paths differ per machine)
+CMakePresets.json
+mcux_include.json
+
 # clangd
 .clangd/
 
