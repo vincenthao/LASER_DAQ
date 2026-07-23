@@ -3,6 +3,8 @@ build/
 
 # IDE
 .vscode/
+!.vscode/c_cpp_properties.json
+!.vscode/settings.json
 
 # CMake presets (local paths differ per machine)
 CMakePresets.json
