@@ -28,6 +28,7 @@
 #include <zephyr/usb/class/usbd_msc.h> /* USB Mass Storage Class */
 #include <zephyr/usb/bos.h>            /* USB BOS 描述符 */
 #include <zephyr/usb/usbd_msg.h>       /* USB 消息类型 (CONFIGURATION 等) */
+#include <zephyr/sys/reboot.h>          /* sys_reboot 系统重启 */
 
 #include "Proto/can_proto.h"            /* CAN 协议层 */
 #include "Proto/can_sniffer.h"           /* CAN 嗅探模块 */
@@ -98,24 +99,10 @@ static void erase_flash_and_format(void)
 	fres = f_mkfs("NAND:", &mkfs_opt, work, sizeof(work));
 	printk("Format: %d (%s)\n", fres, (fres == FR_OK) ? "OK" : "FAIL");
 
-	/* 3. 重新挂载 */
-	struct fs_mount_t mp = {
-		.type = FS_FATFS,
-		.fs_data = &fat_fs,
-		.storage_dev = (void *)PARTITION_ID(storage_partition),
-		.mnt_point = "/NAND:",
-	};
-	int ret = fs_mount(&mp);
-	printk("Mount: %d (%s)\n", ret, (ret == 0) ? "OK" : "FAIL");
-
-	/* 4. 重建目录 */
-	if (ret == 0) {
-		fs_mkdir("/NAND:/sniff");
-		fs_mkdir("/NAND:/collect");
-		printk("Dirs: sniff/ collect/ created\n");
-	}
-
-	printk("=== EraseFlash DONE ===\n\n");
+	/* 3. 重启系统 — 格式化后让启动流程自动挂载并重建目录 */
+	printk("Rebooting in 1s...\n\n");
+	k_msleep(1000);                               /* 等待日志输出完成 */
+	sys_reboot(SYS_REBOOT_COLD);                  /* 冷重启 */
 }
 
 /* ---- UART RX 中断回调 ---- */

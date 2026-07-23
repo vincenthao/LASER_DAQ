@@ -61,6 +61,8 @@ static const char *tp_name(uint8_t tp)
 {
 	switch (tp) {
 	case TP_NOSAMP:   return "RAW";          /* 原始值 */
+	case TP_TEMPSW:   return "T_SW";         /* 温度开关状态 */
+	case TP_CURSW:    return "C_SW";         /* 电流开关状态 */
 	case TP_IREAL:    return "I_ACT";         /* LD 电流实际值 */
 	case TP_LDV:      return "LDV";           /* LD 电压 */
 	case TP_PSUMP:    return "PSUMP";         /* LD 功率 I×V */
@@ -211,8 +213,8 @@ void can_collect_poll(const struct device *can_dev)
  * configure_node — 配置一个 K64 节点的全部 Monitor 周期
  *
  * 每 slot 配置 6 项:
- *   电流: tc=101(采样I), tc=102(电压), tc=103(功率), tc=107(目标I)
- *   温度: tc=101(采样T1), tc=104(TEC占空比)
+ *   电流: tc=101(实测I), tc=107(目标I)
+ *   温度: tc=101(T1), tc=102(T2), tc=103(T3), tc=104(TEC占空比)
  * 共 6 slot × 6 Monitor = 36 条 SETREGS
  * ================================================================ */
 
@@ -223,19 +225,19 @@ static void configure_node(const struct device *can_dev, uint8_t node_id)
 	for (int s = 0; s < COLLECT_MAX_SLOTS; s++) {
 		/* 电流 Monitor: OP_S_CURR=7 */
 		send_setregs(can_dev, node_id, s,
-			     TC_MON_C_IREAD_SAMP, OP_S_CURR, period); /* 采样电流 */
-		send_setregs(can_dev, node_id, s,
-			     TC_MON_C_LDV, OP_S_CURR, period);        /* LD 电压 */
-		send_setregs(can_dev, node_id, s,
-			     TC_MON_C_LDPS, OP_S_CURR, period);       /* LD 功率 I×V */
+			     TC_MON_C_IREAD_SAMP, OP_S_CURR, period); /* LD 实测电流 */
 		send_setregs(can_dev, node_id, s,
 			     TC_MON_C_ISET, OP_S_CURR, period);       /* 电流目标值 */
 
 		/* 温度 Monitor: OP_S_TEMP=5 */
 		send_setregs(can_dev, node_id, s,
-			     TC_MON_T_T1_SAMP, OP_S_TEMP, period);    /* 采样 T1 温度 */
+			     TC_MON_T_T1_SAMP, OP_S_TEMP, period);    /* 第一温度实测值 */
 		send_setregs(can_dev, node_id, s,
-			     TC_MON_T_TEC_DUTY, OP_S_TEMP, period);   /* TEC 占空比 */
+			     TC_MON_T_T2, OP_S_TEMP, period);         /* 第二温度实测值 */
+		send_setregs(can_dev, node_id, s,
+			     TC_MON_T_T3, OP_S_TEMP, period);         /* 第三温度实测值 */
+		send_setregs(can_dev, node_id, s,
+			     TC_MON_T_TEC_DUTY, OP_S_TEMP, period);   /* TEC 温控 PWM 强度 */
 	}
 }
 
