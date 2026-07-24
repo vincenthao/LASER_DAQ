@@ -296,6 +296,8 @@ static void send_setregs(const struct device *can_dev,
 	frame.data[6] = (uint8_t)((data_val >> 16) & 0xFF);
 	frame.data[7] = (uint8_t)((data_val >> 24) & 0xFF);
 
+	/* 总线未就绪时不发, 避免空总线 TX 错误累积导致 bus-off */
+	if (!can_proto_is_bus_ok(can_dev)) return;
 	can_send(can_dev, &frame, K_MSEC(50), NULL, NULL); /* 发送 (短超时) */
 }
 

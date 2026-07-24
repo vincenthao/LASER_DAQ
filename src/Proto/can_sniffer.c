@@ -159,7 +159,12 @@ static void ensure_node_dir(uint8_t node_id)
 {
 	char path[32];                            /* 目录路径 */
 	snprintf(path, sizeof(path), "/NAND:/sniff/%u", node_id); /* 拼接路径 */
-	fs_mkdir(path);                           /* 创建目录 (已存在则忽略) */
+
+	/* 先检查目录是否存在, 避免 fs_mkdir 每次打 EEXIST(-17) ERR 日志 */
+	struct fs_dirent entry;
+	if (fs_stat(path, &entry) != 0) {
+		fs_mkdir(path);                       /* 不存在则创建 */
+	}
 }
 
 /* ================================================================
