@@ -26,15 +26,17 @@ static bool s_node_configured[128];               /* 已下发 Monitor 配置 */
 /* ---- 采集条目缓冲 ---- */
 
 #define COLLECT_BUF_SIZE  128            /* 最大缓存条目数 */
+#define PERIOD_CFG_PATH   "/NAND:/collect/period.cfg" /* 周期配置文件 */
 
 struct collect_entry {
-	uint32_t uptime;                      /* 时间戳 (ms) */
+	uint32_t sample_seq;                  /* 采样批次号 (同批相同, 合并键) */
 	uint8_t node_id;                      /* K64 设备 ID */
 	uint8_t slot;                         /* 槽位号 */
-	uint8_t func;                         /* 功能码 (5=RPTCURR,7=RPTTEMP,9=RPTREGS) */
-	uint8_t tp;                           /* TP 类型码 (主动上报) 或 tc (RPTREGS 响应) */
-	uint8_t opcode;                       /* 操作码 (RPTREGS 响应时有效) */
+	uint8_t func;                         /* 功能码 (5=RPTCURR, 7=RPTTEMP) */
+	uint8_t tp;                           /* TP 类型码 */
+	uint8_t opcode;                       /* 操作码 (主动上报固定 0) */
 	float val_float;                      /* 解析后的浮点值 */
+	uint32_t uptime;                      /* 时间戳 (ms), 辅助列 */
 };
 
 static struct collect_entry s_cbuf[COLLECT_BUF_SIZE]; /* 采集缓冲 */
@@ -42,6 +44,12 @@ static int s_cbuf_count;                 /* 当前条目数 */
 static K_MUTEX_DEFINE(s_cbuf_lock);      /* 缓冲互斥锁 */
 
 static int s_boot_seq;                   /* 本次启动文件序号 */
+static uint32_t s_sample_seq;             /* 当前采样批次号 (每次 flush 递增) */
+
+/* ---- 全局变量 ---- */
+
+uint32_t g_collect_period_ms = COLLECT_REPORT_PERIOD_DEFAULT; /* 当前上报周期 */
+static uint32_t s_sample_seq;             /* 当前采样批次号 (每次 flush 递增) */
 
 /* ---- 内部函数 ---- */
 
@@ -91,10 +99,29 @@ int can_collect_init(const struct device *can_dev)
 
 	memset(s_cbuf, 0, sizeof(s_cbuf));        /* 清零缓冲 */
 	s_cbuf_count = 0;                         /* 重置计数 */
+	s_sample_seq = 0;                         /* 重置批次号 */
 	memset(s_node_configured, 0, sizeof(s_node_configured)); /* 清配置标记 */
 
 	/* 创建 collect 目录 */
 	fs_mkdir("/NAND:/collect");               /* 忽略 EEXIST */
+
+	/* 加载周期配置文件 (不存在则保持默认 500ms) */
+	{
+		struct fs_file_t pf;
+		fs_file_t_init(&pf);
+		if (fs_open(&pf, PERIOD_CFG_PATH, FS_O_READ) == 0) {
+			char buf[16];
+			ssize_t n = fs_read(&pf, buf, sizeof(buf) - 1);
+			if (n > 0) {
+				buf[n] = '\0';
+				uint32_t p;
+				if (sscanf(buf, "%u", &p) == 1 && p >= 50 && p <= 60000) {
+					g_collect_period_ms = p;  /* 有效范围 50ms~60s */
+				}
+			}
+			fs_close(&pf);
+		}
+	}
 
 	/* 扫描已有 csv 取最大序号 */
 	s_boot_seq = 1;
@@ -112,7 +139,8 @@ int can_collect_init(const struct device *can_dev)
 		fs_closedir(&dir);
 	}
 
-	LOG_INF("CAN collect started, boot_seq=%d, mode=config+listen", s_boot_seq);
+	LOG_INF("CAN collect started, boot_seq=%d, period=%ums, mode=config+listen",
+		s_boot_seq, g_collect_period_ms);
 	return 0;
 }
 
@@ -136,60 +164,44 @@ void can_collect_feed(const struct can_frame *frame)
 		return;
 	}
 
-	/* 只处理: RPTCURR(5) / RPTTEMP(7) 主动上报 + RPTREGS(9) 读响应 */
-	if (func != FUNC_RPTCURR && func != FUNC_RPTTEMP && func != FUNC_RPTREGS) return;
+	/* 只处理: RPTCURR(5) / RPTTEMP(7) 主动上报 (RPTREGS 由主控处理, MCXN947 不采集) */
+	if (func != FUNC_RPTCURR && func != FUNC_RPTTEMP) return;
 	if (dlc < 6) return;                      /* 最短 6 字节 */
 
-	uint8_t tp;                               /* TP 类型码 (主动上报) 或 tc (RPTREGS) */
-	uint8_t opcode = 0;                       /* 操作码 */
+	uint8_t tp;                               /* TP 类型码 */
 	uint8_t slot;                             /* 槽位号 */
 	float val;                                /* 测量值 */
 
-	if ((func == FUNC_RPTCURR || func == FUNC_RPTTEMP) && dlc == 6) {
-		/*
-		 * 主动上报帧 (DLC=6):
-		 *   data[0:3] = float 值 (IEEE 754)
-		 *   data[4]   = slot
-		 *   data[5]   = TP 类型码 (TP_IREAL / TP_TREAL / ...)
-		 */
-		memcpy(&val, &frame->data[0], sizeof(val)); /* float */
-		slot = frame->data[4];                /* slot */
-		tp = frame->data[5];                  /* TP 类型码 */
+	/*
+	 * 主动上报帧 (DLC=6):
+	 *   data[0:3] = float 值 (IEEE 754)
+	 *   data[4]   = slot
+	 *   data[5]   = TP 类型码
+	 */
+	memcpy(&val, &frame->data[0], sizeof(val)); /* float */
+	slot = frame->data[4];                    /* slot */
+	tp = frame->data[5];                      /* TP 类型码 */
 
-		/* TP 白名单: 只收 MCXN947 配置过的类型, 过滤主控遗留的旧配置上报 */
-		if (func == FUNC_RPTCURR) {
-			if (tp != TP_IREAL && tp != TP_ISET) return;  /* 仅收实测电流 + 目标值 */
-		} else { /* FUNC_RPTTEMP */
-			if (tp != TP_TREAL && tp != TP_T2REAL &&
-			    tp != TP_T3REAL && tp != TP_TECDUTY) return; /* 仅收 T1/T2/T3/TEC */
-		}
-		opcode = 0;                           /* 主动上报无 opcode */
-	} else {
-		/*
-		 * RPTREGS 响应 或 DLC=8 帧:
-		 *   data[1] = tc (typecode, 寄存器地址)
-		 *   data[2] = opcode
-		 *   data[3] = slot
-		 *   data[4:7] = float 或 uint32 值
-		 *   注意: data[0] 不校验 (K64 可能填 0 或 FUNC_SETREGS)
-		 */
-		memcpy(&val, &frame->data[4], sizeof(val)); /* float */
-		tp = frame->data[1];                  /* 复用 tp 字段存 tc */
-		opcode = frame->data[2];              /* 操作码 */
-		slot = frame->data[3];                /* slot */
+	/* TP 白名单: 只收 MCXN947 配置过的类型, 过滤主控遗留的旧配置上报 */
+	if (func == FUNC_RPTCURR) {
+		if (tp != TP_IREAL && tp != TP_ISET) return;  /* 仅收实测电流 + 目标值 */
+	} else { /* FUNC_RPTTEMP */
+		if (tp != TP_TREAL && tp != TP_T2REAL &&
+		    tp != TP_T3REAL && tp != TP_TECDUTY) return; /* 仅收 T1/T2/T3/TEC */
 	}
 
 	/* 缓冲条目 */
 	k_mutex_lock(&s_cbuf_lock, K_FOREVER);
 	if (s_cbuf_count < COLLECT_BUF_SIZE) {
 		struct collect_entry *e = &s_cbuf[s_cbuf_count];
-		e->uptime = k_uptime_get();
+		e->sample_seq = s_sample_seq;         /* 当前批次号 (flush 后递增) */
 		e->node_id = node_id;
 		e->slot = slot;
 		e->func = func;
-		e->tp = tp;                           /* 主动上报:TP码, RPTREGS:tc */
-		e->opcode = opcode;
+		e->tp = tp;                           /* TP 类型码 */
+		e->opcode = 0;                        /* 主动上报无 opcode */
 		e->val_float = val;
+		e->uptime = k_uptime_get();           /* 时间戳辅助列 */
 		s_cbuf_count++;
 	}
 	k_mutex_unlock(&s_cbuf_lock);
@@ -228,7 +240,7 @@ void can_collect_poll(const struct device *can_dev)
 
 static void configure_node(const struct device *can_dev, uint8_t node_id)
 {
-	uint32_t period = COLLECT_REPORT_PERIOD_MS; /* 500ms */
+	uint32_t period = g_collect_period_ms;    /* 使用当前配置的周期 */
 
 	for (int s = 0; s < COLLECT_MAX_SLOTS; s++) {
 		/* 电流 Monitor: OP_S_CURR=7 */
@@ -317,8 +329,8 @@ void can_collect_flush(void)
 		if (ret == 0) fs_seek(&f, 0, FS_SEEK_END);
 	} else {
 		ret = fs_open(&f, file_path, FS_O_CREATE | FS_O_WRITE);
-		/* 写 CSV 头 */
-		const char *header = "uptime,node_id,slot,func,tp,tp_name,opcode,val_float,val_hex\n";
+		/* 写 CSV 头: sample_seq 为主键, uptime 为辅助列 */
+		const char *header = "sample_seq,node_id,slot,func,tp,tp_name,opcode,val_float,val_hex,uptime\n";
 		fs_write(&f, header, strlen(header));
 	}
 	if (ret < 0) {
@@ -336,36 +348,58 @@ void can_collect_flush(void)
 		/* 功能码名称 */
 		const char *fname =
 			(e->func == FUNC_RPTCURR) ? "RPTCURR" :
-			(e->func == FUNC_RPTTEMP) ? "RPTTEMP" :
-			(e->func == FUNC_RPTREGS) ? "RPTREGS" : "???";
+			(e->func == FUNC_RPTTEMP) ? "RPTTEMP" : "???";
 
-		/* tp 列: 主动上报填 TP 名, RPTREGS 填 tc 号 */
-		const char *tlabel;
-		if (e->func == FUNC_RPTCURR || e->func == FUNC_RPTTEMP) {
-			tlabel = tp_name(e->tp);          /* 主动上报: TP 名称 */
-		} else {
-			tlabel = NULL;                    /* RPTREGS: 只用数字 */
-		}
+		/* tp 列: 主动上报填 TP 名称 */
+		const char *tlabel = tp_name(e->tp);
 
-		int len;
-		if (tlabel) {
-			len = snprintf(line, sizeof(line),
-				"%u,%u,%u,%s,%u,%s,%u,%.4f,0x%08X\n",
-				e->uptime, e->node_id, e->slot, fname,
-				e->tp, tlabel, e->opcode,
-				(double)e->val_float, raw);
-		} else {
-			len = snprintf(line, sizeof(line),
-				"%u,%u,%u,%s,%u,,%u,%.4f,0x%08X\n",
-				e->uptime, e->node_id, e->slot, fname,
-				e->tp, e->opcode,
-				(double)e->val_float, raw);
-		}
+		int len = snprintf(line, sizeof(line),
+			"%u,%u,%u,%s,%u,%s,%u,%.4f,0x%08X,%u\n",
+			e->sample_seq, e->node_id, e->slot, fname,
+			e->tp, tlabel, e->opcode,
+			(double)e->val_float, raw, e->uptime);
 		if (len > 0 && len < (int)sizeof(line)) {
 			fs_write(&f, line, len);
 		}
 	}
 
 	fs_close(&f);
-	LOG_INF("Collect: flushed %d entries to %s", count, file_path);
+	s_sample_seq++;                           /* 批次号递增, 下一轮数据用新 seq */
+	LOG_INF("Collect: flushed %d entries to %s (seq=%u)", count, file_path, s_sample_seq - 1);
+}
+
+/* ================================================================
+ * can_collect_set_period — 自定义上报周期 (写配置文件, 重启生效)
+ * ================================================================ */
+
+void can_collect_set_period(uint32_t period_ms)
+{
+	if (period_ms < 50 || period_ms > 60000) {
+		printk("Period out of range (50-60000 ms)\n");
+		return;
+	}
+
+	struct fs_file_t f;
+	fs_file_t_init(&f);
+	int ret = fs_open(&f, PERIOD_CFG_PATH, FS_O_CREATE | FS_O_WRITE);
+	if (ret < 0) {
+		printk("Failed to write period config: %d\n", ret);
+		return;
+	}
+
+	char buf[8];
+	int len = snprintf(buf, sizeof(buf), "%u", period_ms);
+	fs_write(&f, buf, len);
+	fs_close(&f);
+
+	printk("Period set to %u ms (reboot required)\n", period_ms);
+}
+
+/* ================================================================
+ * can_collect_get_period — 查询当前上报周期
+ * ================================================================ */
+
+uint32_t can_collect_get_period(void)
+{
+	return g_collect_period_ms;
 }

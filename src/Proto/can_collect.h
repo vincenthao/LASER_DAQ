@@ -21,8 +21,9 @@
 /* 每节点最大 slot 数 */
 #define COLLECT_MAX_SLOTS 6
 
-/* 默认主动上报周期 (ms) */
-#define COLLECT_REPORT_PERIOD_MS 500    /* 每 500ms 上报一次 */
+/* 默认主动上报周期 (ms) — 可通过 Period=N 串口命令修改, 重启生效 */
+#define COLLECT_REPORT_PERIOD_DEFAULT 500    /* 每 500ms 上报一次 */
+extern uint32_t g_collect_period_ms;          /* 当前使用的上报周期 */
 
 /* ---- K64 操作码 (对齐 GSK5G_MCU GS_REGDEF.h) ---- */
 
@@ -75,16 +76,22 @@
 #define TP_TECV      26                 /* TEC 电压 */
 #define TP_TECP      27                 /* TEC 功率 */
 
-/** 初始化采集模块 (创建 collect 目录, 启动序号) */
+/** 初始化采集模块 (创建 collect 目录, 加载周期配置, 启动序号) */
 int can_collect_init(const struct device *can_dev);
 
-/** 喂入 CAN 帧, 心跳发现 + 解析主动上报 + RPTREGS 响应 */
+/** 喂入 CAN 帧, 心跳发现 + 解析主动上报 */
 void can_collect_feed(const struct can_frame *frame);
 
 /** 轮询: 发现新节点时配置 Monitor 周期, 已配置节点跳过 */
 void can_collect_poll(const struct device *can_dev);
 
-/** 刷盘: 将缓存的采集数据写入窄表 CSV */
+/** 刷盘: 将缓存的采集数据写入窄表 CSV, 同一批次共享 sample_seq */
 void can_collect_flush(void);
+
+/** 自定义上报周期: 写入配置文件, 需重启生效 */
+void can_collect_set_period(uint32_t period_ms);
+
+/** 查询当前上报周期 (ms) */
+uint32_t can_collect_get_period(void);
 
 #endif /* CAN_COLLECT_H */

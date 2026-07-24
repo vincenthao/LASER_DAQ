@@ -123,6 +123,16 @@ static void uart_rx_cb(const struct device *dev, void *user_data)
 				/* 匹配指令 */
 				if (strcmp(s_cmd_buf, "EraseFlash") == 0) {
 					erase_flash_and_format();
+				} else if (strncmp(s_cmd_buf, "Period=", 7) == 0) {
+					uint32_t period;
+					if (sscanf(s_cmd_buf + 7, "%u", &period) == 1) {
+						can_collect_set_period(period); /* 写入配置, 需重启生效 */
+					} else {
+						printk("Usage: Period=500\n");
+					}
+				} else if (strcmp(s_cmd_buf, "Period?") == 0) {
+					printk("Period: %u ms (default 500)\n",
+					       can_collect_get_period());
 				} else {
 					printk("Unknown: %s\n", s_cmd_buf);
 				}
