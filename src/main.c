@@ -141,6 +141,17 @@ static void uart_rx_cb(const struct device *dev, void *user_data)
 				} else if (strcmp(s_cmd_buf, "Period?") == 0) {
 					printk("Period: %u ms (default 500)\n",
 					       can_collect_get_period());
+				} else if (strcmp(s_cmd_buf, "Help?") == 0) {
+					printk(
+						"\n=== LASER DAQ Commands ===\n"
+						"CollectStart  - Start data collection\n"
+						"CollectStop   - Stop data collection\n"
+						"Collect?      - Query collection status\n"
+						"Period=N      - Set report period (50-60000ms, reboot)\n"
+						"Period?       - Query report period\n"
+						"EraseFlash    - Format NOR flash\n"
+						"Help?         - Show this help\n"
+					);
 				} else {
 					printk("Unknown: %s\n", s_cmd_buf);
 				}
