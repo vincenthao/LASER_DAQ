@@ -363,18 +363,22 @@ void can_rx_thread(void *arg1, void *arg2, void *arg3)
 	(void)arg1; (void)arg2; (void)arg3;        /* 未使用参数 */
 
 	struct can_frame frame;                      /* CAN 帧缓冲区 */
+	int drained;                                 /* 本次排空帧数 */
 
 	while (1) {
-		/* 阻塞等待 CAN 帧（永不超时） */
-		int ret = k_msgq_get(&can_rx_msgq, &frame, K_FOREVER);
-		if (ret != 0) {
-			LOG_WRN("CAN RX queue read error: %d", ret);  /* 队列错误 */
-			continue;
+		drained = 0;
+		/* 批量排空消息队列: 避免单帧处理期间新帧堆积溢出 */
+		while (k_msgq_get(&can_rx_msgq, &frame, K_NO_WAIT) == 0) {
+			can_sniffer_feed(&frame);             /* 原始嗅探 */
+			can_collect_feed(&frame);             /* 采集解析 */
+			drained++;
 		}
-
-		/* 嗅探 + 采集: 原始帧和结构化数据并存 */
-		can_sniffer_feed(&frame);                 /* 原始嗅探 */
-		can_collect_feed(&frame);                 /* 采集解析 */
+		/* 队列空则阻塞等待下一帧 */
+		if (drained == 0) {
+			k_msgq_get(&can_rx_msgq, &frame, K_FOREVER);
+			can_sniffer_feed(&frame);             /* 原始嗅探 */
+			can_collect_feed(&frame);             /* 采集解析 */
+		}
 	}
 }
 

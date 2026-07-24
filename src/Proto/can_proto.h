@@ -49,7 +49,7 @@ extern uint8_t g_can_node_id;    /* 当前节点 ID, 默认 LASER_NODE_ID_DEFAUL
 
 /* ---- CAN RX 消息队列 (供 can_proto_init 和 RX 线程共用) ---- */
 
-#define CAN_RX_QUEUE_SIZE 64     /* 消息队列容量: 实际 K64 主动上报 ~40 帧/周期, 64 足够 */
+#define CAN_RX_QUEUE_SIZE 256     /* 消息队列容量: 2 K64 × 6 slot × 10+ TP + 心跳 ≈ 150 帧/周期, 256 足够 */
 extern struct k_msgq can_rx_msgq; /* CAN 帧消息队列 (定义在 can_proto.c) */
 
 /* ---- API ---- */
