@@ -63,6 +63,9 @@ static void configure_node(const struct device *can_dev,
 
 static const char *tp_name(uint8_t tp);                  /* TP 码 → 名称 */
 
+/* flush 本地缓冲区 — 静态分配, 避免栈溢出 (128×20B≈2.5KB) */
+static struct collect_entry s_flush_buf[COLLECT_BUF_SIZE];
+
 /* ---- 主动上报帧中 TP 码 → 描述字符串 ---- */
 
 static const char *tp_name(uint8_t tp)
@@ -304,13 +307,12 @@ void can_collect_flush(void)
 {
 	if (s_cbuf_count == 0) return;            /* 无数据 */
 
-	/* 拷贝缓冲到本地 */
-	struct collect_entry local[COLLECT_BUF_SIZE];
+	/* 拷贝缓冲到静态缓冲区 (避免 2.5KB 栈分配导致溢出) */
 	int count;
 
 	k_mutex_lock(&s_cbuf_lock, K_FOREVER);
 	count = s_cbuf_count;
-	memcpy(local, s_cbuf, count * sizeof(struct collect_entry));
+	memcpy(s_flush_buf, s_cbuf, count * sizeof(struct collect_entry));
 	s_cbuf_count = 0;                         /* 清零 */
 	k_mutex_unlock(&s_cbuf_lock);
 
@@ -341,7 +343,7 @@ void can_collect_flush(void)
 	/* 逐行写入窄表 */
 	char line[128];                           /* 行缓冲 */
 	for (int i = 0; i < count; i++) {
-		struct collect_entry *e = &local[i];
+		struct collect_entry *e = &s_flush_buf[i];
 		uint32_t raw;
 		memcpy(&raw, &e->val_float, sizeof(raw)); /* float→hex */
 
