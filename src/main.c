@@ -123,6 +123,14 @@ static void uart_rx_cb(const struct device *dev, void *user_data)
 				/* 匹配指令 */
 				if (strcmp(s_cmd_buf, "EraseFlash") == 0) {
 					erase_flash_and_format();
+				} else if (strcmp(s_cmd_buf, "CollectStart") == 0) {
+					can_collect_start();          /* 启动采集 */
+				} else if (strcmp(s_cmd_buf, "CollectStop") == 0) {
+					can_collect_stop();           /* 停止采集 */
+				} else if (strcmp(s_cmd_buf, "Collect?") == 0) {
+					printk("Collect: %s (seq=%u)\n",
+					       can_collect_is_active() ? "ACTIVE" : "STOPPED",
+					       can_collect_get_period()); /* 查状态 */
 				} else if (strncmp(s_cmd_buf, "Period=", 7) == 0) {
 					uint32_t period;
 					if (sscanf(s_cmd_buf + 7, "%u", &period) == 1) {

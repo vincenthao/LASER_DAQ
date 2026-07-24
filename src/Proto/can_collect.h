@@ -94,4 +94,13 @@ void can_collect_set_period(uint32_t period_ms);
 /** 查询当前上报周期 (ms) */
 uint32_t can_collect_get_period(void);
 
+/** 启动数据采集: 重置 seq, 新 CSV 文件, 开始写盘 */
+void can_collect_start(void);
+
+/** 停止数据采集: flush 缓冲后暂停写盘 */
+void can_collect_stop(void);
+
+/** 查询采集是否活跃 */
+bool can_collect_is_active(void);
+
 #endif /* CAN_COLLECT_H */

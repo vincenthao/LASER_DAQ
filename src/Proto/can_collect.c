@@ -45,6 +45,7 @@ static K_MUTEX_DEFINE(s_cbuf_lock);      /* 缓冲互斥锁 */
 
 static int s_boot_seq;                   /* 本次启动文件序号 */
 static uint32_t s_sample_seq;             /* 当前采样批次号 (每次 flush 递增) */
+static bool s_collect_active;              /* 采集开关 (串口 CollectStart/Stop 控制) */
 
 /* ---- 全局变量 ---- */
 
@@ -192,6 +193,9 @@ void can_collect_feed(const struct can_frame *frame)
 		if (tp != TP_TREAL && tp != TP_T2REAL &&
 		    tp != TP_T3REAL && tp != TP_TECDUTY) return; /* 仅收 T1/T2/T3/TEC */
 	}
+
+	/* 采集未启动时不缓冲 (心跳发现和节点配置不受影响) */
+	if (!s_collect_active) return;
 
 	/* 缓冲条目 */
 	k_mutex_lock(&s_cbuf_lock, K_FOREVER);
@@ -406,4 +410,51 @@ void can_collect_set_period(uint32_t period_ms)
 uint32_t can_collect_get_period(void)
 {
 	return g_collect_period_ms;
+}
+
+/* ================================================================
+ * can_collect_start — 启动数据采集
+ * ================================================================ */
+
+void can_collect_start(void)
+{
+	if (s_collect_active) {
+		printk("Collect already active (seq=%u)\n", s_sample_seq);
+		return;
+	}
+
+	/* 切换新 CSV 文件, 避免和待机数据混在一起 */
+	s_boot_seq++;
+	s_sample_seq = 0;
+	s_collect_active = true;
+
+	LOG_INF("Collect started, boot_seq=%d", s_boot_seq);
+}
+
+/* ================================================================
+ * can_collect_stop — 停止数据采集
+ * ================================================================ */
+
+void can_collect_stop(void)
+{
+	if (!s_collect_active) {
+		printk("Collect already stopped\n");
+		return;
+	}
+
+	s_collect_active = false;
+
+	/* flush 缓冲中剩余数据 */
+	can_collect_flush();
+
+	LOG_INF("Collect stopped (seq=%u)", s_sample_seq);
+}
+
+/* ================================================================
+ * can_collect_is_active — 查询采集状态
+ * ================================================================ */
+
+bool can_collect_is_active(void)
+{
+	return s_collect_active;
 }
