@@ -17,3 +17,7 @@
 修改完代码需要编译验证。
 
 每次回复，最后面加上喵。
+
+## 工程 Skills
+
+- [setup-clangd](.claude/skills/setup-clangd.md) — 嵌入式项目 clangd 配置（补全/跳转/诊断），含排查指南

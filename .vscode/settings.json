@@ -1,14 +1,26 @@
 {
-  "cmake.configureOnOpen": false,
-  "C_Cpp.errorSquiggles": "disabled",
-  "C_Cpp.files.exclude": {
-    "**/.vscode": true,
-    "**/__repo__": true
-  },
-  "C_Cpp.exclusionPolicy": "checkFolders",
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "cmake.useCMakePresets": "always",
-  "cmake.buildTask": true,
-  "cmake.skipConfigureIfCachePresent": true,
-  "cmake.sourceDirectory": "${workspaceFolder}"
+  "C_Cpp.intelliSenseEngine": "disabled",           /* 本工程用 clangd, 禁用 cpptools */
+  "cmake.configureOnOpen": false,                   /* 手动触发 CMake configure */
+  "cmake.useCMakePresets": "always",                /* 使用 CMakePresets.json */
+  "cmake.buildTask": true,                          /* 启用 cmake build task */
+  "cmake.skipConfigureIfCachePresent": true,        /* 有缓存则跳过 configure */
+  "cmake.sourceDirectory": "${workspaceFolder}",    /* CMake 源码目录 */
+
+  /* clangd 补全 — 服务端排序更可靠，增大结果限制 */
+  "clangd.serverCompletionRanking": true,
+  "clangd.arguments": [
+    "--limit-results=200",
+    "--completion-style=detailed"
+  ],
+
+  /* 补全触发器调优 — 消除延迟，删除重输后立即触发 */
+  "editor.quickSuggestionsDelay": 0,
+  "editor.suggest.snippetsPreventQuickSuggestions": false,
+  "[c]": {
+    "editor.quickSuggestions": {
+      "other": "on",
+      "comments": "off",
+      "strings": "off"
+    }
+  }
 }
