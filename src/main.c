@@ -14,6 +14,8 @@
  *   - CAN ID = (func_code << 7) | (node_id & 0x7F)
  */
 
+#include <stdint.h>
+#include <stdio.h>
 #include <zephyr/kernel.h>             /* k_msleep, k_msgq 等内核 API */
 #include <zephyr/device.h>             /* device_is_ready, DEVICE_DT_GET */
 #include <zephyr/devicetree.h>         /* DT_NODELABEL 等设备树宏 */
@@ -33,6 +35,8 @@
 #include "Proto/can_proto.h"            /* CAN 协议层 */
 #include "Proto/can_sniffer.h"           /* CAN 嗅探模块 */
 #include "Proto/can_collect.h"           /* CAN 数据采集模块 */
+#include "zephyr/arch/arch_interface.h"
+#include "zephyr/sys/printk.h"
 
 LOG_MODULE_REGISTER(laser_daq, LOG_LEVEL_INF); /* 注册日志模块 "laser_daq" */
 
@@ -76,6 +80,25 @@ static volatile bool g_storage_locked;    /* USB 连接时置 true, 暂停文件
 
 static char s_cmd_buf[UART_CMD_BUF_SIZE];                  /* 行缓冲 */
 static int s_cmd_pos;                                      /* 写指针 */
+
+// 网络协议数据结构体
+typedef struct {
+	uint32_t timestamp;  // 时间戳
+	uint16_t node_id;    // 节点 ID
+	uint16_t data_length; // 数据长度
+	uint8_t data[256];   // 数据内容
+} net_data_t;
+
+// 链表结构体定义
+typedef struct list {
+	struct list *prev;
+	net_data_t data;
+	struct list *next;
+} list_t; 
+
+static list_t head; // 哨兵节点
+// 链表内存池定义
+K_MEM_SLAB_DEFINE(my_mem_slab, sizeof(list_t), 10, 4);  /* 定义内存池: 10 个节点, 每个节点大小为 sizeof(list_t) */
 
 /* ---- 擦除 Flash 格式化 ---- */
 
@@ -529,5 +552,38 @@ static int init_network_upload(void)
 {
 	LOG_INF("Network upload: initializing Ethernet/ESP32...");
 	/* TODO: 初始化网络栈，连接上传服务器 */
+	
+	// 链表测试
+	// 初始化哨兵节点
+	head.prev = &head;
+	head.next = &head;
+
+	list_t *node = NULL;
+	k_mem_slab_alloc(&my_mem_slab, (void **)&node, K_NO_WAIT);  /* 分配链表节点 */
+	if (node == NULL) {
+		LOG_ERR("Failed to allocate memory for new node");
+		return -1;
+	}
+	node->data.timestamp = 1234567890;  /* 测试数据 */
+	node->data.node_id = 33;
+	node->data.data_length = 4;
+	node->data.data[0] = 0xDE;
+	node->data.data[1] = 0xAD;
+	node->data.data[2] = 0xBE;
+	node->data.data[3] = 0xEF;
+	node->prev = &head;
+	node->next = &head;
+	head.prev = node;
+	head.next = node;
+
+	list_t *current = head.next;
+	while (current != &head) {
+		printf("Node: %p, Data: %lu, %d\n", (void *)current, current->data.timestamp, current->data.node_id);
+		current = current->next;
+	}
+
+	
 	return 0;  /* 占位返回成功 */
 }
+
+
